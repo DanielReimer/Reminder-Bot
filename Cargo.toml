@@ -1,0 +1,9 @@
+[package]
+name = "reminder_bot"
+version = "0.1.0"
+authors = ["dreimer"]
+
+[dependencies]
+irc ="0.13"
+diesel = { version = "1.0.0", features = ["postgres"] }
+dotenv = "0.9.0"
