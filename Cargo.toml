@@ -1,7 +1,7 @@
 [package]
 name = "reminder_bot"
 version = "0.1.0"
-authors = ["dreimer"]
+authors = ["Daniel Reimer <daniel.k.reimer97@gmail.com"]
 
 [dependencies]
 irc ="0.13"
