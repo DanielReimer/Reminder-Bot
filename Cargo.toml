@@ -7,3 +7,6 @@ authors = ["Daniel Reimer <daniel.k.reimer97@gmail.com"]
 irc ="0.13"
 diesel = { version = "1.0.0", features = ["postgres"] }
 dotenv = "0.9.0"
+regex = "1.0.0"
+chrono = "0.4"
+atoi = "0.2.3"
