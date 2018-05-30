@@ -24,18 +24,15 @@ use chrono::prelude::*;
 use atoi::atoi;
 
 fn main() {
-
-    //let nick_name = "pigs";
-    //let channel_name = "#pigspen";
     //let reminder = create_post(&connection, &nick_name, &channel_name, &100, &200, &true, &1, &1000);
     //println!("\nSaved draft {} with id {}", nick_name, reminder.id);
 
 
     // config for IRC server
     let config = Config {
-        nickname: Some("reminder".to_owned()),
-        server: Some("irc.cat.pdx.edu".to_owned()),
-        channels: Some(vec!["#pigspen".to_owned()]),
+        nickname: Some("reminderbot".to_owned()),
+        server: Some("chat.freenode.net".to_owned()),
+        channels: Some(vec!["#reminderbot_test".to_owned()]),
         use_ssl: Some(true),
         ..Default::default()
     };
