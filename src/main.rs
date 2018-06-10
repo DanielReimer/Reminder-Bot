@@ -5,11 +5,12 @@ extern crate regex;
 extern crate chrono;
 extern crate atoi;
 
-use std::default::Default;
+//use std::default::Default;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::thread;
 use std::time;
-use std::str;
+//use std::str;
+use std::path::Path;
 
 use self::models::*;
 use self::diesel::prelude::*;
@@ -17,106 +18,166 @@ use reminder_bot::*;
 use reminder_bot::schema::reminders::dsl::*;
 
 use irc::client::prelude::*;
+use irc::client::data::Config;
 use irc::error;
 
 use regex::Regex;
 use chrono::prelude::*;
-use atoi::atoi;
+//use atoi::atoi;
 
 fn main() {
-    //let reminder = create_post(&connection, &nick_name, &channel_name, &100, &200, &true, &1, &1000);
-    //println!("\nSaved draft {} with id {}", nick_name, reminder.id);
+    // configure and connect to irc
+    let (client, mut reactor) = connect_to_irc();
 
-
-    // config for IRC server
-    let config = Config {
-        nickname: Some("reminderbot".to_owned()),
-        server: Some("chat.freenode.net".to_owned()),
-        channels: Some(vec!["#reminderbot_test".to_owned()]),
-        use_ssl: Some(true),
-        ..Default::default()
-    };
-
-    let mut reactor = IrcReactor::new().unwrap();
-    let client = reactor.prepare_client_and_connect(&config).unwrap();
-    client.identify().unwrap();
-
+    // debug thread to temporarly show all entries in database
     thread::spawn(move || {
-        // conncect to the database
         let connection = establish_connection();
 
-        loop {
-            let results = reminders
-                .load::<Reminder>(&connection)
-                .expect("Error loading reminders");
-
-            //let start = SystemTime::now();
-            //let since_the_epoch = start.duration_since(UNIX_EPOCH)
-            //    .expect("Time went backwards");
-
-            for reminder in results {
-                println!("{}", reminder.nick);
-                println!("{}", reminder.channel);
-                println!("{}", reminder.set_time);
-                println!("-----------------------------------");
-             }
-
-            // check for ready reminders every 30 seconds
-            thread::sleep(time::Duration::from_millis(30_000));
-        }
-    });
-
-    // make a clone for the thread
-    let client_clone = client.clone();
-
-    // thread to check for reminders to print
-    thread::spawn(move || {
-        // conncect to the database
-        let connection = establish_connection();
-
-        // wait till connected to IRC before printing
         thread::sleep(time::Duration::from_millis(5000));
-        let _ = client_clone.send_privmsg("#pigspen", "yooooo");
-
-        let frequency: u64 = 30_000;
-
         loop {
 
+            println!("----------------Printing---------------------");
             let results = reminders
                 .load::<Reminder>(&connection)
                 .expect("Error loading reminders");
 
-            let start = SystemTime::now();
-            let since_the_epoch = start.duration_since(UNIX_EPOCH)
-                .expect("Time went backwards");
-
             for reminder in results {
-                if (since_the_epoch.as_secs() - frequency/100) as i32 <= reminder.remind_time {
-                    if reminder.remind_time <= (since_the_epoch.as_secs() as i32) {
-                        client_clone.send_privmsg(&reminder.channel, "message was found");
-                    }
-                }
-            }
-
-            // check for ready reminders every 30 seconds
-            thread::sleep(time::Duration::from_millis(frequency));
+                println!("{}", reminder.remind_time);
+             }
+            thread::sleep(time::Duration::from_millis(15_000));
         }
     });
+
+    check_for_reminders(client.clone());
+    delete_old_entries();
 
     reactor.register_client_with_handler(client, process_msg);
-    reactor.run().unwrap();
+    reactor.run().expect("Could not run the IRC client");
+}
 
+/// Load IRC config and establish a connection
+fn connect_to_irc() -> (IrcClient, IrcReactor) {
+    // load the config for IRC server
+    let path = Path::new("irc.toml");
+    let config = Config::load(path).expect("Could not load IRC configuration file");
+
+    // connect to IRC
+    let mut reactor = IrcReactor::new().expect("Could not make new IrcReactor");
+    let client = reactor.prepare_client_and_connect(&config).expect("Could not prepare client");
+    client.identify().expect("Could not identify client");
+    (client, reactor)
+}
+
+/// thread to check for reminders to print
+fn check_for_reminders(client: IrcClient) -> () {
+    thread::spawn(move || {
+        // conncect to the database
+        let connection = establish_connection();
+        let frequency: u64 = 10_000;
+
+        loop {
+            // check for ready reminders every 30 seconds
+            thread::sleep(time::Duration::from_millis(frequency));
+            print_reminders(&connection, &client);
+        }
+    });
+}
+
+fn print_reminders(connection: &PgConnection, client: &IrcClient) -> () {
+    // get all reminders that have not been reminded yet
+    let results = reminders
+        .filter(reminded.eq(false))
+        .load::<Reminder>(connection)
+        .expect("Error loading reminders");
+
+    // get current time
+    let start = SystemTime::now();
+    let since_the_epoch = start.duration_since(UNIX_EPOCH)
+        .expect("Time went backwards");
+
+    for mut reminder in results {
+        if reminder.remind_time <= (since_the_epoch.as_secs() as i64) {
+            // subtract 25200 to appear in correct timezone
+            //let dt = NaiveDateTime::from_timestamp(reminder.set_time - 25200, 0);
+            let dt = (NaiveDateTime::from_timestamp(reminder.set_time, 0), Local);
+            let time_message = dt.format("%I %p on %b %-d").to_string();
+            let format_message = format!("{}: Around {}, you asked me to remind you {}",
+                                         reminder.nick, time_message, reminder.remind_message);
+            print_msg(&client.clone(), &reminder.channel.clone(), &format_message);
+
+            // update the entry to say that it has been reminded
+            diesel::update(reminders.filter(id.eq(reminder.id)))
+                .set(reminded.eq(true))
+                .execute(connection)
+                .expect("Error updating posts");
+        }
+    }
+}
+
+/// thread to occasionaly clean up old reminders
+/// it should be 10+ minutes so users have a chance to 'snooze' the reminder
+fn delete_old_entries() -> () {
+    thread::spawn(move || {
+        // conncect to the database
+        let connection = establish_connection();
+        let frequency: u64 = 50_000;
+
+        loop {
+            // check for old reminders every so often
+            thread::sleep(time::Duration::from_millis(frequency));
+            delete_entry(frequency as i64, &connection);
+        }
+    });
+}
+
+fn delete_entry(frequency: i64, connection: &PgConnection) -> () {
+    println!("--------------------------Deleting Reminders-----------------------");
+    let results = reminders
+        .filter(reminded.eq(true))
+        .load::<Reminder>(connection)
+        .expect("Error loading reminders");
+
+    let start = SystemTime::now();
+    let since_the_epoch = start.duration_since(UNIX_EPOCH)
+        .expect("Time went backwards");
+
+    for reminder in results {
+        if reminder.remind_time <= ((since_the_epoch.as_secs() as i64) - ((frequency as i64)/1000)) {
+            println!("Getting rid of reminder at {} for time is {}", reminder.remind_time, since_the_epoch.as_secs() as i32);
+            diesel::delete(reminders.filter(id.eq(reminder.id)))
+                .execute(connection)
+                .expect("Error deleting posts");
+        }
+        else {
+            println!("Not getting rid of reminder at {} for time is {} and expected removal is {}",
+                     reminder.remind_time, since_the_epoch.as_secs() as i32, (since_the_epoch.as_secs() as i64) - 50_000/1000);
+        }
+    }
+}
+
+/// Prints out a message to console and IRC
+///
+/// # Arguments
+///
+/// * `client` - An IrcClient object reference
+/// * `target` - A string slice of where the message is sent
+/// * `message` - A string slice of the message to send
+fn print_msg(client: &IrcClient, target: &str, message: &str) {
+    let local: DateTime<Local> = Local::now();
+    let print_str = local.format("%a %b %e %T").to_string();
+
+    println!("{}  Target: {}   Message: {}", print_str, target, message);
+    client.send_privmsg(target, message).expect("Unable to send message to IRC");
 }
 
 fn process_msg(client: &IrcClient, message: Message) -> error::Result<()> {
     print!("{}", message);
 
-
     let connection = establish_connection();
 
     if let Command::PRIVMSG(ref target, ref msg) = message.command {
         //println!("{:?}", message.source_nickname());
-        let mut nick_handle = "";
+        let mut nick_handle;
         match message.source_nickname() {
             Some(s) => nick_handle = s,
             None => nick_handle = "",
@@ -125,76 +186,30 @@ fn process_msg(client: &IrcClient, message: Message) -> error::Result<()> {
         // matches for source
         let source = Regex::new(r"^(?i)reminderbot:? source(?-i)").unwrap();
         if source.is_match(msg) {
-            client.send_privmsg(target, "Source: https://github.com/DanielReimer/Reminder-Bot").unwrap();
+            print_msg(&client.clone(), &target.clone(), "Source: https://github.com/DanielReimer/Reminder-Bot");
         }
 
         // matches for help display
         let help = Regex::new(r"^(?i)reminderbot:? help(?-i)").unwrap();
         if help.is_match(msg) {
-            use chrono::TimeZone;
-            use chrono::offset::LocalResult;
-
-            // Construct a datetime from epoch:
-            let dt = Local::today();
-            println!("{}", dt);
-            let start = SystemTime::now();
-            let since_the_epoch = start.duration_since(UNIX_EPOCH)
-                .expect("Time went backwards");
-            println!("{}", since_the_epoch.as_secs());
-            client.send_privmsg(target, message.response_target().unwrap_or(target)).unwrap();
+            print_msg(&client.clone(), &target.clone(), "Help message");
+            //client.send_privmsg(target, message.response_target().unwrap_or(target)).unwrap();
         }
+
         //matches for a new reminder
-        let reminder_set_regex = Regex::new(r"^(?i)(reminderbot: )?remind (?-i)").unwrap();
+        let reminder_set_regex = Regex::new(r"^\s*(?i)(reminderbot: )?remind (?-i)").unwrap();
         if reminder_set_regex.is_match(msg) {
             //remove begining bit
             let reminder = &reminder_set_regex.replace(msg, "");
 
-            //find out who is reminder is for
-            let reminder_next_regex = Regex::new(r"\W+").unwrap();
-            let mut fields: Vec<&str> = reminder_next_regex.splitn(reminder, 2).collect();
-            let reminder_time_message = fields[1];
-            let for_user = fields[0];
-
-            println!("{:?}", &fields);
-
-            if for_user != "me" {
-                match client.list_users(target) {
-                    Some(list) => println!("{}", list[1].get_nickname()),//client.send_privmsg(target, "setting reminder").unwrap(),
-                    None => client.send_privmsg(target, "Sorry, could not set reminder").unwrap(),
-                }
-            } else {
-                println!("meeeeee");
-
+            match parse_reminder(reminder)  {
+                Some(reminder_meta) => {
+                    let (reminder_time, reminder_message) = reminder_meta;
+                    create_post(&connection, &nick_handle, &target, &current_time(), &reminder_time, reminder_message);
+                    ()
+                },
+                None => print_msg(&client.clone(), &target.clone(), "Sorry, I could not set your reminder"),
             }
-
-            fields = reminder_next_regex.splitn(reminder_time_message, 2).collect();
-            let time_type = fields[0];
-
-            println!("{:?}", &fields);
-
-            if time_type == "in" {
-                println!("it was in");
-                let reminder_time: Vec<&str> = reminder_next_regex.splitn(fields[1], 2).collect();
-
-                let start = SystemTime::now();
-                let since_the_epoch = start.duration_since(UNIX_EPOCH)
-                    .expect("Time went backwards");
-
-                println!("{} and {:?}", fields[1], fields[1].as_bytes());
-                match atoi::<i32>(fields[1].as_bytes()) {
-                    Some(s) => {create_post(&connection, &nick_handle, &target, &(since_the_epoch.as_secs() as i32), &(((since_the_epoch.as_secs()as i32)+s) as i32), &false, &0, &0); ()}
-                    None => println!("Error"),
-                };
-                //println!("\nSaved draft {} with id {}", nick_name, reminder.id);
-                //println!("reminder was set for: {}", (since_the_epoch.as_secs()+fields[0].parse().unwrap()));
-            }
-
-            //client.send_privmsg(target, SystemTime::now().as_secs()).unwrap();
-            //let start = SystemTime::now();
-            //let since_the_epoch = start.duration_since(UNIX_EPOCH)
-            //    .expect("Time went backwards");
-            //println!("{}", since_the_epoch.as_secs());
-            //lient.send_privmsg(target, &(since_the_epoch.as_secs().to_string())).unwrap();
         }
     }
     Ok(())

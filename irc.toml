@@ -1,0 +1,7 @@
+nickname = "reminderbot"
+username = "reminderbot"
+realname = "Daniel Reimer"
+server = "chat.freenode.net"
+port = 6697
+use_ssl = true
+channels = ["#reminderbottest"]
