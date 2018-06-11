@@ -1,5 +1,11 @@
+// Copyright (c) 2018 Daniel Reimer
+// [This program is licensed under the "MIT License"]
+// Please see the file LICENSE in the source
+// distribution of this software for license terms
+
 use super::schema::reminders;
 
+/// Holds the entire reminder
 #[derive(Queryable)]
 pub struct Reminder {
     pub id: i32,
@@ -11,6 +17,7 @@ pub struct Reminder {
     pub remind_message: String,
 }
 
+/// Holds everything that is required to set a new reminder
 #[derive(Insertable)]
 #[table_name = "reminders"]
 pub struct NewReminder<'a> {

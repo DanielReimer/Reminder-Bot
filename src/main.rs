@@ -1,3 +1,8 @@
+// Copyright (c) 2018 Daniel Reimer
+// [This program is licensed under the "MIT License"]
+// Please see the file LICENSE in the source
+// distribution of this software for license terms
+
 extern crate reminder_bot;
 extern crate irc;
 extern crate diesel;
@@ -5,11 +10,9 @@ extern crate regex;
 extern crate chrono;
 extern crate atoi;
 
-//use std::default::Default;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::thread;
 use std::time;
-//use std::str;
 use std::path::Path;
 
 use self::models::*;
@@ -23,7 +26,6 @@ use irc::error;
 
 use regex::Regex;
 use chrono::prelude::*;
-//use atoi::atoi;
 
 fn main() {
     // configure and connect to irc
@@ -69,7 +71,11 @@ fn connect_to_irc() -> (IrcClient, IrcReactor) {
 }
 
 /// thread to check for reminders to print
-fn check_for_reminders(client: IrcClient) -> () {
+///
+/// # Arguments
+///
+/// * `client` - A IrcClient the messages should be sent as
+fn check_for_reminders(client: IrcClient) {
     thread::spawn(move || {
         // conncect to the database
         let connection = establish_connection();
@@ -83,7 +89,13 @@ fn check_for_reminders(client: IrcClient) -> () {
     });
 }
 
-fn print_reminders(connection: &PgConnection, client: &IrcClient) -> () {
+/// print reminders that were found
+///
+/// # Arguments
+///
+/// * `connection` - A PgConnection of where the database lives
+/// * `client` - A IrcClient the messages should be sent as
+fn print_reminders(connection: &PgConnection, client: &IrcClient) {
     // get all reminders that have not been reminded yet
     let results = reminders
         .filter(reminded.eq(false))
@@ -98,8 +110,7 @@ fn print_reminders(connection: &PgConnection, client: &IrcClient) -> () {
     for mut reminder in results {
         if reminder.remind_time <= (since_the_epoch.as_secs() as i64) {
             // subtract 25200 to appear in correct timezone
-            //let dt = NaiveDateTime::from_timestamp(reminder.set_time - 25200, 0);
-            let dt = (NaiveDateTime::from_timestamp(reminder.set_time, 0), Local);
+            let dt = NaiveDateTime::from_timestamp(reminder.set_time - 25200, 0);
             let time_message = dt.format("%I %p on %b %-d").to_string();
             let format_message = format!("{}: Around {}, you asked me to remind you {}",
                                          reminder.nick, time_message, reminder.remind_message);
@@ -115,8 +126,7 @@ fn print_reminders(connection: &PgConnection, client: &IrcClient) -> () {
 }
 
 /// thread to occasionaly clean up old reminders
-/// it should be 10+ minutes so users have a chance to 'snooze' the reminder
-fn delete_old_entries() -> () {
+fn delete_old_entries() {
     thread::spawn(move || {
         // conncect to the database
         let connection = establish_connection();
@@ -130,7 +140,13 @@ fn delete_old_entries() -> () {
     });
 }
 
-fn delete_entry(frequency: i64, connection: &PgConnection) -> () {
+/// delete old reminders that were found
+///
+/// # Arguments
+///
+/// * `frequency` - An i64 that determines how frequent to delete old reminders in seconds
+/// * `connection` - A PgConnection of where the database lives
+fn delete_entry(frequency: i64, connection: &PgConnection) {
     println!("--------------------------Deleting Reminders-----------------------");
     let results = reminders
         .filter(reminded.eq(true))
@@ -155,7 +171,7 @@ fn delete_entry(frequency: i64, connection: &PgConnection) -> () {
     }
 }
 
-/// Prints out a message to console and IRC
+/// Prints out a message to console and IRC server
 ///
 /// # Arguments
 ///
@@ -170,13 +186,20 @@ fn print_msg(client: &IrcClient, target: &str, message: &str) {
     client.send_privmsg(target, message).expect("Unable to send message to IRC");
 }
 
+/// Processes every message sent to see if a response is needed
+///
+/// # Arguments
+///
+/// * `client` - A IrcClient the messages should be sent as
+/// * `message` - A Message that the client has just recieved
 fn process_msg(client: &IrcClient, message: Message) -> error::Result<()> {
+    // print to console for logging purposes
     print!("{}", message);
 
     let connection = establish_connection();
 
     if let Command::PRIVMSG(ref target, ref msg) = message.command {
-        //println!("{:?}", message.source_nickname());
+        // get the nick name
         let mut nick_handle;
         match message.source_nickname() {
             Some(s) => nick_handle = s,
@@ -193,7 +216,6 @@ fn process_msg(client: &IrcClient, message: Message) -> error::Result<()> {
         let help = Regex::new(r"^(?i)reminderbot:? help(?-i)").unwrap();
         if help.is_match(msg) {
             print_msg(&client.clone(), &target.clone(), "Help message");
-            //client.send_privmsg(target, message.response_target().unwrap_or(target)).unwrap();
         }
 
         //matches for a new reminder
@@ -203,12 +225,21 @@ fn process_msg(client: &IrcClient, message: Message) -> error::Result<()> {
             let reminder = &reminder_set_regex.replace(msg, "");
 
             match parse_reminder(reminder)  {
-                Some(reminder_meta) => {
+                Ok(reminder_meta) => {
                     let (reminder_time, reminder_message) = reminder_meta;
                     create_post(&connection, &nick_handle, &target, &current_time(), &reminder_time, reminder_message);
-                    ()
+
+                    // get time the reminder was set and format
+                    let dt = NaiveDateTime::from_timestamp(reminder_time - 25200, 0);
+                    let time_message = dt.format("%R on %b %-d").to_string();
+                    let rmd_msg = format!("{}: Reminder was set for {}", nick_handle, time_message);
+
+                    print_msg(&client.clone(), &target.clone(), &rmd_msg);
                 },
-                None => print_msg(&client.clone(), &target.clone(), "Sorry, I could not set your reminder"),
+                Err(e) => {
+                    let err_msg = format!("Sorry, I could not set your reminder: {}", e);
+                    print_msg(&client.clone(), &target.clone(), &err_msg);
+                }
             }
         }
     }

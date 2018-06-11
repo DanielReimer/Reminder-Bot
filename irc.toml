@@ -1,7 +1,7 @@
-nickname = "reminderbot"
-username = "reminderbot"
+nickname = "reminder"
+username = "reminder"
 realname = "Daniel Reimer"
-server = "chat.freenode.net"
+server = "irc.cat.pdx.edu"
 port = 6697
 use_ssl = true
-channels = ["#reminderbottest"]
+channels = ["#pigspen"]
