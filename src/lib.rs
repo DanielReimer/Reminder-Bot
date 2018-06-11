@@ -96,17 +96,6 @@ pub fn parse_reminder(msg: &str) -> Result<(i64, &str), &'static str> {
     //find out who is reminder is for
     let reminder_next_regex = Regex::new(r"\W+").unwrap();
     let fields: Vec<&str> = reminder_next_regex.splitn(msg, 3).collect();
-    //let reminder_time_message = fields[1];
-
-    //let for_user = fields[0];
-    /*if for_user != "me" {
-        match client.list_users(target) {
-            Some(list) => println!("{}", list[1].get_nickname()),//client.send_privmsg(target, "setting reminder").unwrap(),
-             None => client.send_privmsg(target, "Sorry, could not set reminder").unwrap(),
-        }
-    }*/
-
-    //fields = reminder_next_regex.splitn(reminder_time_message, 2).collect();
 
     if fields.len() <= 2 {
         return Err("Not enough arguments");

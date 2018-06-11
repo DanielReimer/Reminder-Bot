@@ -31,25 +31,6 @@ fn main() {
     // configure and connect to irc
     let (client, mut reactor) = connect_to_irc();
 
-    // debug thread to temporarly show all entries in database
-    thread::spawn(move || {
-        let connection = establish_connection();
-
-        thread::sleep(time::Duration::from_millis(5000));
-        loop {
-
-            println!("----------------Printing---------------------");
-            let results = reminders
-                .load::<Reminder>(&connection)
-                .expect("Error loading reminders");
-
-            for reminder in results {
-                println!("{}", reminder.remind_time);
-             }
-            thread::sleep(time::Duration::from_millis(15_000));
-        }
-    });
-
     check_for_reminders(client.clone());
     delete_old_entries();
 
@@ -147,7 +128,6 @@ fn delete_old_entries() {
 /// * `frequency` - An i64 that determines how frequent to delete old reminders in seconds
 /// * `connection` - A PgConnection of where the database lives
 fn delete_entry(frequency: i64, connection: &PgConnection) {
-    println!("--------------------------Deleting Reminders-----------------------");
     let results = reminders
         .filter(reminded.eq(true))
         .load::<Reminder>(connection)
@@ -159,14 +139,9 @@ fn delete_entry(frequency: i64, connection: &PgConnection) {
 
     for reminder in results {
         if reminder.remind_time <= ((since_the_epoch.as_secs() as i64) - ((frequency as i64)/1000)) {
-            println!("Getting rid of reminder at {} for time is {}", reminder.remind_time, since_the_epoch.as_secs() as i32);
             diesel::delete(reminders.filter(id.eq(reminder.id)))
                 .execute(connection)
                 .expect("Error deleting posts");
-        }
-        else {
-            println!("Not getting rid of reminder at {} for time is {} and expected removal is {}",
-                     reminder.remind_time, since_the_epoch.as_secs() as i32, (since_the_epoch.as_secs() as i64) - 50_000/1000);
         }
     }
 }
@@ -215,7 +190,9 @@ fn process_msg(client: &IrcClient, message: Message) -> error::Result<()> {
         // matches for help display
         let help = Regex::new(r"^(?i)reminderbot:? help(?-i)").unwrap();
         if help.is_match(msg) {
-            print_msg(&client.clone(), &target.clone(), "Help message");
+            print_msg(&client.clone(), &target.clone(), "Help message: I set reminders.");
+            print_msg(&client.clone(), &target.clone(), "Examples: remind me in 10 minutes to eat food");
+            print_msg(&client.clone(), &target.clone(), "          remind me tomrrow to sleep");
         }
 
         //matches for a new reminder
@@ -224,7 +201,7 @@ fn process_msg(client: &IrcClient, message: Message) -> error::Result<()> {
             //remove begining bit
             let reminder = &reminder_set_regex.replace(msg, "");
 
-            match parse_reminder(reminder)  {
+            match parse_reminder(reminder) {
                 Ok(reminder_meta) => {
                     let (reminder_time, reminder_message) = reminder_meta;
                     create_post(&connection, &nick_handle, &target, &current_time(), &reminder_time, reminder_message);
